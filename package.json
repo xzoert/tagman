@@ -1,0 +1,26 @@
+{
+  "name": "tagman",
+  "version": "1.0.0",
+  "description": "Tagging engine using sqlite",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xzoert/tagman.git"
+  },
+  "keywords": [
+    "tagging"
+  ],
+  "author": "Max Jacob",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/xzoert/tagman/issues"
+  },
+  "homepage": "https://github.com/xzoert/tagman#readme",
+  "dependencies": {
+    "sqlite3": "^3.1.1",
+    "sqlite3-transactions": "0.0.5"
+  }
+}

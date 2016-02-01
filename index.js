@@ -2,6 +2,7 @@ var path=require('path');
 var sqlite3=require('sqlite3').verbose();
 var fs=require('fs');
 var TransactionDatabase = require("sqlite3-transactions").TransactionDatabase;
+var Q=require('q');
 
 var pool={};
 
@@ -14,7 +15,18 @@ function getUserHome() {
   return process.env[(process.platform == 'win32') ? 'USERPROFILE' : 'HOME'];
 }
 
-exports.get=function(sqlfilepath,callback) {
+
+exports.getq=function(sqlfilepath) {
+	var d=Q.defer();
+	exports.getcb(sqlfilepath,function(err,tagman) {
+		if (err) d.reject(err);
+		else d.resolve(tagman.q);
+	});
+	return d.promise;
+}
+
+
+exports.getcb=function(sqlfilepath,callback) {
 	if (!callback && typeof sqlfilepath === 'function' ) {
 		callback=sqlfilepath;
 		sqlfilepath=null;
@@ -52,6 +64,8 @@ function AsyncIterator(list) {
 	}
 	this._list=list;
 }
+
+exports.AsyncIterator=AsyncIterator;
 
 AsyncIterator.prototype.run=function(step,end) {
 	count=0;
@@ -93,7 +107,7 @@ function Tagman(sqlfilepath,callback) {
 				self._db.run("CREATE TABLE resource (_url TEXT, _created_at INTEGER, _modified_at INTEGER)");
 				self._db.run("CREATE UNIQUE INDEX resource_url on resource (_url)");
 				self._db.run("CREATE TABLE resource_field (name TEXT, type INTEGER)");
-				self._db.run("CREATE TABLE resource_tag (resource_id INTEGER, tag_id INTEGER, weight INTEGER, FOREIGN KEY (resource_id) REFERENCES resource (rowid), FOREIGN KEY (tag_id) REFERENCES tag (rowid))");
+				self._db.run("CREATE TABLE resource_tag (resource_id INTEGER, tag_id INTEGER, FOREIGN KEY (resource_id) REFERENCES resource (rowid), FOREIGN KEY (tag_id) REFERENCES tag (rowid))");
 				self._db.run("CREATE UNIQUE INDEX resource_tag_relation on resource_tag (resource_id,tag_id)");
 				self._db.run("CREATE INDEX resource_tag_by_tag on resource_tag (tag_id)");
 			}
@@ -109,6 +123,53 @@ function Tagman(sqlfilepath,callback) {
 		});
 	});
 	
+	this.q={
+		cb: self,
+		define: function(fieldName,fieldType) {
+			var d=Q.defer();
+			self.define(fieldName,fieldType,function(err) {
+				if (err) d.reject(err);
+				else d.resolve();
+			});
+			return d.promise;
+		},
+		update: function(url,tags,data) {
+			var d=Q.defer();
+			self.update(url,tags,data,function(err,id) {
+				if (err) d.reject(err);
+				else d.resolve(id);
+			});
+			return d.promise;
+		},
+		remove: function(url) {
+			var d=Q.defer();
+			self.remove(url,function(err,id) {
+				if (err) d.reject(err);
+				else d.resolve(id);
+			});
+			return d.promise;
+		},
+		findEntries: function (tags,orderBy,limit,offset) {
+			var d=Q.defer();
+			self.findEntries(tags,orderBy,limit,offset,function(err,res) {
+				if (err) d.reject(err);
+				else d.resolve(res);
+			});
+			return d.promise;
+		},
+		tagCloud: function (tags,limit) {
+			var d=Q.defer();
+			self.tagCloud(tags,limit,function(err,res) {
+				if (err) d.reject(err);
+				else d.resolve(res);
+			});
+			return d.promise;
+		}
+	};
+	
+	this.q.q=this.q;
+	this.cb=this;
+	
 }
 
 
@@ -116,11 +177,13 @@ Tagman.prototype.getType=function(fieldName) {
 	return this._resourceFields[fieldName];
 }
 
+
 Tagman.prototype.define=function(fieldName, fieldType,callback) {
 	if (!fieldName || typeof fieldName !== 'string') throw 'Invalid field name';
-	fieldName=fieldName.trim();
+	fieldName=fieldName.trim().toLowerCase();
 	if (fieldName in this._resourceFields) {
 		if (fieldType!=this._resourceFields[fieldName]) throw 'Field '+fieldName+' already exists with a different type';
+		if (callback) callback();
 		return;
 	}
 	if (!fieldName.match(/^[a-zA-Z][a-zA-Z\_\-0-9]*$/)) throw 'Invalid field name';
@@ -163,7 +226,7 @@ Tagman.prototype.define=function(fieldName, fieldType,callback) {
 Tagman.prototype._error=function(err,callback,transaction) {
 	if (err) {
 		if (transaction) {
-			transaction.rollback(function () {
+			transaction.rollback(function (err) {
 				if (callback) callback(err);
 				throw err;
 			});
@@ -176,6 +239,7 @@ Tagman.prototype._error=function(err,callback,transaction) {
 		return 0;
 	}
 }
+
 
 Tagman.prototype.update=function(url,tags,data,callback) {
 	if (typeof tags==='string') tags=exports.parseTags(tags);
@@ -202,9 +266,9 @@ Tagman.prototype.update=function(url,tags,data,callback) {
 					if (self._error(err,callback,db)) return;
 					var id=this.lastID;
 					var iterator=new AsyncIterator(tags);
-					iterator.run(function (name,next) {
-						var weight=tags[name];
-						self._tagUsed(db,name,id,weight,next);
+					iterator.run(function (i,next) {
+						var name=tags[i];
+						self._tagUsed(db,name,id,next);
 					},function(errors) {
 						if (errors) {
 							db.rollback(function(){
@@ -236,14 +300,14 @@ Tagman.prototype.update=function(url,tags,data,callback) {
 				db.run("UPDATE resource "+fields+" WHERE rowid="+resource.rowid,values,function(err) {
 					if (self._error(err,callback,db)) return;
 					var rTags={};
-					var uTags={};
-					db.each("SELECT tag.name,resource_tag.weight from resource_tag, tag where resource_tag.tag_id=tag.rowid and resource_tag.resource_id="+resource.rowid,function (err,row) {
+					var iTags={};
+					for (var i in tags) { 
+						iTags[tags[i]]=1;
+					}
+					db.each("SELECT tag.name from resource_tag, tag where resource_tag.tag_id=tag.rowid and resource_tag.resource_id="+resource.rowid,function (err,row) {
 						if (self._error(err,callback,db)) return;
-						if (row.name in tags) {
-							if (row.weight!=tags[row.name]) {
-								uTags[row.name]=tags[row.name];
-							}
-							delete tags[row.name];
+						if (row.name in iTags) {
+							delete iTags[row.name];
 						} else {
 							rTags[row.name]=1;
 						}
@@ -254,20 +318,14 @@ Tagman.prototype.update=function(url,tags,data,callback) {
 							self._tagUnused(db,name,resource.rowid,next);
 						},function (err) {
 							if (self._error(err,callback,db)) return;
-							var iIterator=new AsyncIterator(tags);
+							var iIterator=new AsyncIterator(iTags);
 							iIterator.run(function (name,next) {
-								self._tagUsed(db,name,resource.rowid,tags[name],next);
+								self._tagUsed(db,name,resource.rowid,next);
 							},function(err) {
 								if (self._error(err,callback,db)) return;
-								uIterator=new AsyncIterator(uTags);
-								uIterator.run(function (name,next) {
-									self._tagChanged(db,name,resource.rowid,uTags[name],next);
-								},function(err) {
-									if (self._error(err,callback,db)) return;
-									db.commit(function(err) {
-										if (callback) callback(err,resource.rowid);
-										else if (err) throw err;
-									});
+								db.commit(function(err) {
+									if (callback) callback(err,resource.rowid);
+									else if (err) throw err;
 								});
 							});
 						});
@@ -279,8 +337,135 @@ Tagman.prototype.update=function(url,tags,data,callback) {
 }
 
 
+Tagman.prototype.remove=function (url,callback) {
+	var self=this;
+	this._db.get("SELECT rowid FROM resource WHERE _url=?",[url],function (err, resource) {
+		if (self._error(err,callback)) return;
+		if (resource) {
+			self._db.beginTransaction(function (err,db) {
+				var rTags={};
+				db.each("SELECT tag.name from resource_tag, tag where resource_tag.tag_id=tag.rowid and resource_tag.resource_id="+resource.rowid,function (err,row) {
+					if (self._error(err,callback,db)) return;
+					rTags[row.name]=1;
+				},function (err) {
+					if (self._error(err,callback,db)) return;
+					var rIterator=new AsyncIterator(rTags);
+					rIterator.run(function (name,next) {
+						self._tagUnused(db,name,resource.rowid,next);
+					},function (err) {
+						db.run("DELETE FROM resource_tag WHERE resource_id=?",[resource.rowid],function (err) {
+							if (self._error(err,callback,db)) return;
+							db.run("DELETE FROM resource WHERE rowid=?",[resource.rowid],function(err) {
+								if (self._error(err,callback,db)) return;
+								db.commit(function(err) {
+									if (callback) callback(err,resource.rowid);
+									else if (err) throw err;
+								});
+							});
+						});
+					});
+				});
+			});
+		} else {
+			if (callback) callback();
+		}
+	});
+}
 
-Tagman.prototype._tagUsed=function(db,tag,resourceId,weight,callback) {
+
+Tagman.prototype.findEntries=function(tags,orderBy,limit,offset,callback) {
+	var params=[];
+	var self=this;
+	var sql="SELECT r.* FROM resource r";
+	if (tags) {
+		if (typeof tags==='string') tags=exports.parseTags(tags);
+		for (var i in tags) {
+			var name=tags[i];
+			if (name in self._tags) {
+				var tagId=self._tags[name].rowid;
+				sql+=" INNER JOIN resource_tag rt"+i+" ON rt"+i+".resource_id=r.rowid AND rt"+i+".tag_id=?";
+				params.push(tagId);
+			} else {
+				// tag not in database, no document matches!
+				console.log('TAG '+name+' NOT IN DATABASE');
+				if (callback) callback(null,[]);
+				return;
+			}
+		}
+	}
+	if (orderBy) {
+		orderBy=orderBy.trim().toLowerCase();
+		if (orderBy in self._resourceFields) {
+			sql+=' ORDER BY '+orderBy;
+		} else {
+			var msg='No such field: "'+orderBy+'".';
+			if (callback) callback(msg);
+			else throw msg;
+			return;
+		}
+		var field=self._resourceFields
+	}
+	if (!offset) offset=0;
+	if (limit) {
+		sql+=' LIMIT ?,?';
+		params.push(offset);
+		params.push(limit);
+	}
+	var result=[];
+	self._db.each(sql,params,function (err,row) {
+		if (self._error(err,callback)) return;
+		result.push(row);
+	}, function (err) {
+		if (self._error(err,callback)) return;
+		if (callback) callback(null,result);
+	});
+}
+
+
+Tagman.prototype.tagCloud=function(tags,limit,callback) {
+	var params=[];
+	var self=this;
+	var sql="SELECT tag.name, COUNT(rt.rowid) as weight FROM resource_tag rt INNER JOIN tag ON rt.tag_id=tag.rowid";
+	var where=null;
+	if (tags) {
+		if (typeof tags==='string') tags=exports.parseTags(tags);
+		for (var i in tags) {
+			var name=tags[i];
+			if (name in self._tags) {
+				var tagId=self._tags[name].rowid;
+				sql+=" INNER JOIN resource_tag rt"+i+" ON rt"+i+".resource_id=rt.resource_id AND rt"+i+".tag_id=?";
+				if (!where) where=' WHERE rt.tag_id!=?';
+				else where+=' AND rt.tag_id!=?';
+				params.push(tagId);
+			} else {
+				// tag not in database
+				if (callback) callback(null,[]);
+				return;
+			}
+		}
+	}
+	if (where) {
+		sql+=where;
+		params=params.concat(params);
+	}
+	sql+=' GROUP BY rt.tag_id ORDER BY weight DESC';
+	if (limit) {
+		sql+=' LIMIT 0,?';
+		params.push(limit);
+	}
+	var result=[];
+	self._db.each(sql,params,function (err,row) {
+		if (self._error(err,callback)) return;
+		result.push(row);
+	}, function (err) {
+		if (self._error(err,callback)) return;
+		if (callback) callback(null,result);
+	});
+	
+}
+
+
+Tagman.prototype._tagUsed=function(db,tag,resourceId,callback) {
 	var self=this;
 	if (tag in self._tags) {
 		var now=Date.now();
@@ -289,7 +474,7 @@ Tagman.prototype._tagUsed=function(db,tag,resourceId,weight,callback) {
 			if (self._error(err,callback,db)) return;
 			to.resource_count+=1;
 			to.last_used_at=now;
-			db.run("INSERT INTO resource_tag (resource_id, tag_id, weight) VALUES (?,?,?)",[resourceId,to.rowid,weight],function(err) {
+			db.run("INSERT INTO resource_tag (resource_id, tag_id) VALUES (?,?)",[resourceId,to.rowid],function(err) {
 				if (self._error(err,callback,db)) return;
 				if (callback) callback(null,to);
 			});
@@ -301,7 +486,7 @@ Tagman.prototype._tagUsed=function(db,tag,resourceId,weight,callback) {
 			if (self._error(err,callback,db)) return;
 			to.rowid=this.lastID;
 			self._tags[tag]=to;
-			db.run("INSERT INTO resource_tag (resource_id, tag_id, weight) VALUES (?,?,?)",[resourceId,to.rowid,weight],function(err) {
+			db.run("INSERT INTO resource_tag (resource_id, tag_id) VALUES (?,?)",[resourceId,to.rowid],function(err) {
 				if (self._error(err,callback,db)) return;
 				if (callback) callback(null,to);
 			});
@@ -328,30 +513,13 @@ Tagman.prototype._tagUnused=function(db,tag,resourceId,callback) {
 	}
 }
 
-Tagman.prototype._tagChanged=function(db,tag,resourceId,weight,callback) {
-	var self=this;
-	if (tag in self._tags) {
-		var to=self._tags[tag];
-		db.run("UPDATE resource_tag SET weight=? where tag_id=? and resource_id=?",[weight,to.rowid,resourceId],function(err) {
-			if (self._error(err,callback,db)) return;
-			callback(null,to);
-		});
-	}
-}
+
 
 
 exports.parseTags=function(text) {
-	var res={};
-	var re=/([a-zA-Z0-9\_]+(\-[a-zA-Z0-9\_]+)*)(\*([\d]+))?/g;
-	
-	while ((match = re.exec(text)) !== null) {
-		var tag=match[1].toLowerCase();
-		var imp=match[4];
-		if (imp) imp=parseInt(imp);
-		else imp=1;
-		if (!res[tag] || res[tag]<imp) res[tag]=imp;
-	}
-	return res;
+	if (!text) return [];
+	return text.split(/\s*,\s*/g);
 }
+
 
 

@@ -1,34 +1,16 @@
 Tagman=require('tagman');
 Q=require('q');
-/*
-tagman=Tagman.get(function(err,tagman) {
-	tagman.define(' label ',Tagman.Text);
-	tagman.define('description',Tagman.Text);
-	//console.log('TAGS',tagman._tags);
-	tagman.update(
-		'http://www.google.com',
-		//{'internet':1,'search-engine':2},
-		//'#internet ##search-engine',
-		'internettauta*5, search-engine*2 abbi chiari propositi nella vita',
-		{label: 'Google Inc.', description: 'Internet search engine'},
-		function (err, id) {
-			console.log('UPDATED',err,id);
-		}
-	);
-});
-*/
-
 
 var testData=[
 	{url: 'http://www.google.com', tags: 'internet, search engine', data: { label: 'Google' }},
 	{url: 'http://www.xzoert.org', tags: 'musica, genio, internet', data: { label: 'Xzoert' }},
 	{url: 'http://www.freesounds.net', tags: 'musica, suoni', data: { label: 'Freesounds' }},
-	{url: 'dedalus', tags: 'search engine, genio, internet', data: { label: 'Dedalus' }}
+	{url: 'dedalus', tags: 'search engine, genio, INTERNET', data: { label: 'Dedalus' }}
 ];
 
 
 var tagman;
-Tagman.getq()
+Tagman.q.get()
 .then(function(t) {
 	tagman=t;
 	return tagman.define(' label ',Tagman.Text);
@@ -71,5 +53,4 @@ Tagman.getq()
 
 
 
-//tagman.update('http://www.google.com',{label: 'Google', description: 'Internet search engine', tags:['internet','search-engine']});
 

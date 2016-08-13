@@ -1,7 +1,9 @@
-var path=require('path');
-var fs=require('fs');
-var Q=require('q');
-var engine=require('./engine');
+const path=require('path');
+const fs=require('fs');
+const Q=require('q');
+const engine=require('./engine');
+const server=require('./server');
+const rest=require('./rest');
 
 
 /*
@@ -57,16 +59,30 @@ exports.get=function(sqlfilepath,callback) {
 Qed version of get: returns a promise instead of using a callback.
 */
 exports.q={
-	get: function(sqlfilepath) {
+	get: (sqlfilepath) => {
 		var d=Q.defer();
-		exports.get(sqlfilepath,function(err,tagman) {
+		exports.get(sqlfilepath, (err,tagman) => {
 			if (err) d.reject(err);
 			else d.resolve(tagman.q);
 		});
 		return d.promise;
+	},
+	getRest: (tagman) => {
+		return rest.get(tagman);
 	}
 }
 
 
+exports.runServer=function (port) {
+	server.run(port);
+}
 
+exports.getRest=function (tagman,callback) {
+	rest.get(tagman).
+	then(function (rest) {
+		callback(null,rest);
+	}, function (err) {
+		callback(err,null);
+	});
+}
 

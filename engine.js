@@ -103,9 +103,9 @@ function Engine(sqlfilepath,callback) {
 			});
 			return d.promise;
 		},                                   
-		rename: (url,newUrl) => {
+		rename: (url,newUrl,renameDescendants) => {
 			var d=Q.defer();
-			self.rename(url, newUrl, true, (err,id) => {
+			self.rename(url, newUrl, renameDescendants, (err,id) => {
 				if (err) d.reject(err);
 				else d.resolve(id);
 			});
@@ -272,7 +272,6 @@ Engine.prototype.loadBulk=function(data,callback) {
 		var datai=new AsyncIterator(data);
 		datai.seq(function (i,next) {
 			var entry=data[i];
-			console.log('INSERTING',i+'/'+data.length);
 			self._update(db,entry.url,entry.tags,entry.data,function (err,id) {
 				next(err);
 			});
@@ -471,21 +470,31 @@ Engine.prototype.rename=function (url,newUrl,renameDescendants,callback) {
 				if (newPath.length>path.length && newPath.substr(0,path.length)==path) {
 					// RENAMED AS A DESCENDANT OF ITSELF...
 					// UPDATES THE PATH AND URL OF THE RESOURCE AND ITS DESCENDANTS, NOTHING ELSE CHANGES
-					db.run("UPDATE resource SET _path=? || SUBSTR(_path,?+1), _url=? || SUBSTR(_url,?+1) WHERE _path LIKE ? || '%';",[newPath,path.length,newUrl,url.length,path],function(err) {
+					var sql="UPDATE resource SET _path=? || SUBSTR(_path,?+1), _url=? || SUBSTR(_url,?+1) WHERE _path LIKE ? || '%'";
+					var params=[newPath,path.length,newUrl,url.length,path];
+					db.run(sql,params,function(err) {
 						if (self._error(err,callback,db)) return;
 						db.commit( (err) => {
 							if (callback) callback(err,resource.rowid);
 							else if (err) throw err;
 						});
 					});
+				} else if (path.length>newPath.length && path.substr(0,newPath.length)==newPath) {
+					// RENAMED AS AN ANCESTOR OF ITSELS.... DO NOT ALLOW BY NOW
+					if (callback) callback("Can't rename as an ancestor of itself.");
+					return;
 				} else {
 					// INSERTS NEW ANCESTORS FOR THE RESOURCE AND ITS CURRENT DESCENDANTS
-					db.run("INSERT INTO tree_idx (desc_id,anc_id) SELECT t.desc_id, r.rowid FROM resource r, tree_idx t WHERE ? LIKE _path || '%' AND ? NOT LIKE _path || '%' AND t.anc_id=?",[id,newPath,path,id],function(err) {
+					var sql="INSERT INTO tree_idx (desc_id,anc_id) SELECT t.desc_id, r.rowid FROM resource r, tree_idx t WHERE ? LIKE _path || '%' AND ? NOT LIKE _path || '%' AND t.anc_id=?";
+					var params=[newPath,path,id];
+					db.run(sql,params,function(err) {
 						// INSERTS NEW DESCENDATS 
 						db.run("INSERT INTO tree_idx (desc_id,anc_id) SELECT rowid, ? FROM resource WHERE _path LIKE ? AND _path NOT LIKE ? AND rowid!=?",[id,newPath+'%',path+'%',id],function(err) {
 						if (self._error(err,callback,db)) return;
 							// DELETES OLD ANCESTORS FOR THE RESOURCE AND ITS DESCENDANTS
-							db.run("DELETE FROM tree_idx t1 WHERE EXISTS (SELECT rowid FROM tree_idx t2 WHERE t2.anc_id=? AND t2.desc_id=t1.desc_id) AND t1.desc_id!=t1.anc_id AND NOT EXISTS (SELECT rowid FROM resource r WHERE rowid=t1.anc_id AND ? LIKE r._path || '%')",[id,newPath],function(err) {
+							var sql="DELETE FROM tree_idx WHERE EXISTS (SELECT rowid FROM tree_idx t2 WHERE t2.anc_id=? AND t2.desc_id=tree_idx.desc_id) AND desc_id!=anc_id AND anc_id!=? AND NOT EXISTS (SELECT rowid FROM resource r WHERE rowid=tree_idx.anc_id AND ? LIKE r._path || '%')";
+							var params=[id,id,newPath];
+							db.run(sql,params,function(err) {
 								// UPDATES THE PATH AND URL OF THE RESOURCE AND ITS DESCENDANTS
 								db.run("UPDATE resource SET _path=? || SUBSTR(_path,?+1), _url=? || SUBSTR(_url,?+1) WHERE _path LIKE ? || '%';",[newPath,path.length,newUrl,url.length,path],function(err) {
 									if (self._error(err,callback,db)) return;
@@ -499,18 +508,28 @@ Engine.prototype.rename=function (url,newUrl,renameDescendants,callback) {
 					});
 				}
 			} else {
-				// INSERT NEW DESCENDATS 
-				db.run("INSERT INTO tree_idx (desc_id,anc_id) SELECT rowid, ? FROM resource WHERE _path LIKE ? AND _path NOT LIKE ? AND rowid!=?",[id,newPath+'%',path+'%',id],function(err) {
+				// INSERT NEW DESCENDATS
+				var sql="INSERT INTO tree_idx (desc_id,anc_id) SELECT rowid, ? FROM resource WHERE _path LIKE ? AND _path NOT LIKE ? AND rowid!=?";
+				var params=[id,newPath+'%',path+'%',id];
+				db.run(sql,params,function(err) {
 					// INSERTS NEW ANCESTORS	
-					db.run("INSERT INTO tree_idx (desc_id,anc_id) SELECT ?, rowid FROM resource WHERE ? LIKE _path || '%' AND ? NOT LIKE _path || '%' AND rowid!=?",[id,newPath,path,id],function(err) {
+					var sql="INSERT INTO tree_idx (desc_id,anc_id) SELECT ?, rowid FROM resource WHERE ? LIKE _path || '%' AND ? NOT LIKE _path || '%' AND rowid!=?";
+					var params=[id,newPath,path,id];
+					db.run(sql,params,function(err) {
 						if (self._error(err,callback,db)) return;
 							// DELETES OLD ANCESTORS
-							db.run("DELETE FROM tree_idx WHERE desc_id=? AND desc_id!=anc_id AND NOT EXISTS (SELECT rowid FROM resource WHERE rowid=anc_id AND ? LIKE _path || '%')",[id,newPath],function(err) {
+							var sql="DELETE FROM tree_idx WHERE desc_id=? AND desc_id!=anc_id AND NOT EXISTS (SELECT rowid FROM resource WHERE rowid=anc_id AND ? LIKE _path || '%')";
+							var params=[id,newPath];
+							db.run(sql,params,function(err) {
 								if (self._error(err,callback,db)) return;
 								// DELETES OLD DESCENDANTS
-								db.run("DELETE FROM tree_idx WHERE asc_id=? AND desc_id!=anc_id AND NOT EXISTS (SELECT rowid FROM resource WHERE rowid=anc_id AND _path LIKE ?)",[id,newPath+'%'],function(err) {
+								var sql="DELETE FROM tree_idx WHERE anc_id=? AND desc_id!=anc_id AND NOT EXISTS (SELECT rowid FROM resource WHERE rowid=anc_id AND _path LIKE ?)";
+								var params=[id,newPath+'%'];
+								db.run(sql,params,function(err) {
 									// UPDATES THE PATH AND URL
-									db.run("UPDATE resource SET _url=?, _path=? WHERE rowid=?",[newUrl,newPath],function(err) {
+									var sql="UPDATE resource SET _url=?, _path=? WHERE rowid=?";
+									var params=[newUrl,newPath,id];
+									db.run(sql,params,function(err) {
 										if (self._error(err,callback,db)) return;
 										db.commit( (err) => {
 											if (callback) callback(err,resource.rowid);
@@ -612,26 +631,50 @@ Engine.prototype.findResources=function(tags,orderBy,limit,offset,callback) {
 	});
 }
 
+Engine.prototype._getTags=function (row,callback) {
+	var self=this;
+	row._tags=[];
+	var sql="SELECT tag.name AS name, rt.comment AS comment, anc._url AS inheritedFrom FROM resource_tag rt, tag, tree_idx, resource as anc WHERE rt.resource_id=tree_idx.anc_id AND tag.rowid=rt.tag_id AND anc.rowid=tree_idx.anc_id AND tree_idx.desc_id=? order by tag.name";
+	self._db.each(sql,[row.rowid],function (err,tagrow) {
+		if (self._error(err,callback)) return;
+		row._tags.push(tagrow);
+	},function (err) {
+		delete row.rowid;
+		delete row._path;
+		if (callback) callback(null,row);
+	});
+}
+
 Engine.prototype.getResource=function (url,callback) {
 	var self=this;
 	var sql='SELECT rowid,* FROM resource WHERE _path=?';
-	self._db.get(sql,[self._pathFromUrl(url)], (err,row) => {
+	var path=self._pathFromUrl(url);
+	self._db.get(sql,[path], (err,row) => {
 		if (self._error(err,callback)) return;
 		if (!row) {
-			if (callback) callback(null,null);
-			return;
+			// FIND THE CLOSEST ANCESTOR
+			var sql="SELECT rowid,* FROM resource WHERE ? LIKE _path || '%' ORDER BY _path DESC LIMIT 1";
+			self._db.get(sql,[path], (err,row) => {
+				if (self._error(err,callback)) return;
+				if (!row) {
+					if (callback) callback(null,null);
+				}
+				self._getTags(row, (err,row) => {
+					if (self._error(err,callback)) return;
+					row._url=url;
+					delete row._created_at;
+					delete row._modified_at;
+					delete row.label;
+					delete row.description;
+					if (callback) callback(null,row);
+				});
+			});
+		} else {
+			self._getTags(row, (err,row) => {
+				if (self._error(err,callback)) return;
+				if (callback) callback(null,row);
+			});
 		}
-		row._tags=[];
-		var sql="SELECT tag.name AS name, rt.comment AS comment, anc._url AS inheritedFrom FROM resource_tag rt, tag, tree_idx, resource as anc WHERE rt.resource_id=tree_idx.anc_id AND tag.rowid=rt.tag_id AND anc.rowid=tree_idx.anc_id AND tree_idx.desc_id=? order by tag.name";
-		self._db.each(sql,[row.rowid],function (err,tagrow) {
-			console.log('TAG',tagrow);
-			if (self._error(err,callback)) return;
-			row._tags.push(tagrow);
-		},function (err) {
-			delete row.rowid;
-			delete row._path;
-			if (callback) callback(null,row);
-		});
 	});
 }
 

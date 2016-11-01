@@ -206,6 +206,7 @@ Handler.prototype.updateResource=function(data,callback) {
 }
 
 Handler.prototype.renameResource=function(data,callback) {
+	console.log('REST RENAME',data);
 	var self=this;
 	var url=data.url||'';
 	if (!url) {
@@ -217,7 +218,7 @@ Handler.prototype.renameResource=function(data,callback) {
 		callback({code: 500, msg: 'No new url'});
 		return;
 	}
-	self.tagman.rename(url,newUrl,1)
+	self.tagman.rename(url,newUrl,data.renameDescendants)
 	.then( (result) => {
 		if (!result) result=null;
 		callback(null,result);

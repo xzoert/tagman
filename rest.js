@@ -117,6 +117,9 @@ Handler.prototype.handleRequest= function ( req, resp, callback ) {
 					return self.load(data,callback);
 				case 'clear':
 					return self.clear(callback);
+				case 'remove':
+					return self.remove(data,callback);
+					
 				default:
 					callback({code: 404, msg: 'Not found'});
 					return;
@@ -178,6 +181,18 @@ Handler.prototype.getResource=function(data,callback) {
 	var self=this;
 	var url=data.url||'';
 	self.tagman.getResource(url)
+	.then( (result) => {
+		if (!result) result=null;
+		callback(null,result);
+	}, (err) => {
+		callback({code: 500, msg: err});
+	});
+}
+
+Handler.prototype.remove=function(data,callback) {
+	var self=this;
+	var url=data.url||'';
+	self.tagman.remove(url)
 	.then( (result) => {
 		if (!result) result=null;
 		callback(null,result);

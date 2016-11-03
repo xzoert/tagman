@@ -658,6 +658,7 @@ Engine.prototype.getResource=function (url,callback) {
 				if (self._error(err,callback)) return;
 				if (!row) {
 					if (callback) callback(null,null);
+					return;
 				}
 				self._getTags(row, (err,row) => {
 					if (self._error(err,callback)) return;

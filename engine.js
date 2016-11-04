@@ -606,15 +606,15 @@ Engine.prototype.findResources=function(tags,orderBy,limit,offset,callback) {
 	if (orderBy) {
 		orderBy=orderBy.trim().toLowerCase();
 		if (orderBy in self._resourceFields) {
-			sql+=' ORDER BY '+orderBy;
+			sql+=' ORDER BY '+orderBy+' COLLATE NOCASE';
 		} else {
 			var msg='No such field: "'+orderBy+'".';
 			if (callback) callback(msg);
 			else throw msg;
 			return;
 		}
-		var field=self._resourceFields
-	}
+		//var field=self._resourceFields
+	} 
 	if (!offset) offset=0;
 	if (limit) {
 		sql+=' LIMIT ?,?';
@@ -732,6 +732,7 @@ Engine.prototype.tagCloud=function(tags,limit,callback) {
 			var tagId=self._tags[name].rowid;
 			if (i==1) sql+=" WHERE ";
 			else sql+=" AND ";
+			if (tags[name]=='-') sql+='NOT ';
 			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_id=? WHERE i"+i+".desc_id=r.rowid)";
 			if (!where) where=' WHERE rt.tag_id!=?';
 			else where+=' AND rt.tag_id!=?';

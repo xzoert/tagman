@@ -475,7 +475,7 @@ Engine.prototype.rename=function (url,newUrl,renameDescendants,callback) {
 					db.run(sql,params,function(err) {
 						if (self._error(err,callback,db)) return;
 						db.commit( (err) => {
-							if (callback) callback(err,resource.rowid);
+							if (callback) self.getResource(newUrl,callback);
 							else if (err) throw err;
 						});
 					});
@@ -499,7 +499,7 @@ Engine.prototype.rename=function (url,newUrl,renameDescendants,callback) {
 								db.run("UPDATE resource SET _path=? || SUBSTR(_path,?+1), _url=? || SUBSTR(_url,?+1) WHERE _path LIKE ? || '%';",[newPath,path.length,newUrl,url.length,path],function(err) {
 									if (self._error(err,callback,db)) return;
 									db.commit( (err) => {
-										if (callback) callback(err,resource.rowid);
+										if (callback) self.getResource(newUrl,callback);
 										else if (err) throw err;
 									});
 								});

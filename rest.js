@@ -221,7 +221,6 @@ Handler.prototype.updateResource=function(data,callback) {
 }
 
 Handler.prototype.renameResource=function(data,callback) {
-	console.log('REST RENAME',data);
 	var self=this;
 	var url=data.url||'';
 	if (!url) {

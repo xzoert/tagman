@@ -575,6 +575,7 @@ Engine.prototype.findResources=function(tags,orderBy,limit,offset,callback) {
 			var tagId=self._tags[name].rowid;
 			if (i==1) sql+=" WHERE ";
 			else sql+=" AND ";
+			if (tags[name]==-1) sql+='NOT ';
 			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_id=? WHERE i"+i+".desc_id=r.rowid)";
 			i++;
 			params.push(tagId);
@@ -732,7 +733,7 @@ Engine.prototype.tagCloud=function(tags,limit,callback) {
 			var tagId=self._tags[name].rowid;
 			if (i==1) sql+=" WHERE ";
 			else sql+=" AND ";
-			if (tags[name]=='-') sql+='NOT ';
+			if (tags[name]==-1) sql+='NOT ';
 			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_id=? WHERE i"+i+".desc_id=r.rowid)";
 			if (!where) where=' WHERE rt.tag_id!=?';
 			else where+=' AND rt.tag_id!=?';

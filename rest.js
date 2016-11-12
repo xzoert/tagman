@@ -169,7 +169,8 @@ Handler.prototype.getSuggestions=function(data,callback) {
 	var offset=data.offset||null;
 	var prefix=data.prefix||'';
 	var exclude=data.exclude||[];
-	self.tagman.getSuggestions(prefix,exclude,limit,offset)
+	var minWeight=data.minWeight||0;
+	self.tagman.getSuggestions(prefix,exclude,limit,offset,minWeight)
 	.then( (result) => {
 		callback(null,result);
 	}, (err) => {

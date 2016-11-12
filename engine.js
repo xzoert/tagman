@@ -135,9 +135,9 @@ function Engine(sqlfilepath,callback) {
 			});
 			return d.promise;
 		},
-		getSuggestions: (prefix,exclude,limit,offset) => {
+		getSuggestions: (prefix,exclude,limit,offset,minWeight) => {
 			var d=Q.defer();
-			self.getSuggestions(prefix,exclude,limit,offset, (err,res) => {
+			self.getSuggestions(prefix,exclude,limit,offset,minWeight, (err,res) => {
 				if (err) d.reject(err);
 				else d.resolve(res);
 			});
@@ -796,7 +796,7 @@ Engine.prototype.tagCloud=function(tags,limit,callback) {
 	});
 }
 
-Engine.prototype.getSuggestions=function (prefix,exclude,limit,offset,callback) {
+Engine.prototype.getSuggestions=function (prefix,exclude,limit,offset,minWeight,callback) {
 	var self=this;
 	exclude=this._normalizeTagList(exclude);
 	var params=[''+prefix+'%'];
@@ -806,6 +806,10 @@ Engine.prototype.getSuggestions=function (prefix,exclude,limit,offset,callback) 
 			sql+=' AND NAME!=?';
 			params.push(name);
 		}
+	}
+	if (minWeight) {
+		sql+=' AND resource_count>=?';
+		params.push(minWeight);
 	}
 	sql+=' ORDER BY name COLLATE NOCASE';
 	if (!offset) offset=0;

@@ -1,7 +1,6 @@
 # tagman
-Tagging engine in Node + sqlite
+Tagging engine in Nodejs + Sqlite3.
 
-To install:
 ```
 npm install tagman
 ```

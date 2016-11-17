@@ -134,33 +134,47 @@ Handler.prototype.handleRequest= function ( req, resp, callback ) {
 
 
 Handler.prototype.getResources=function(data,callback) {
+	console.log('PARAMS',data);
 	var self=this;
 	var limit=data.limit||null;
 	var offset=data.offset||null;
 	var orderBy=data.orderBy||null;
 	var tagCloud=data.tagCloud||null;
+	var tagCloudUseOr=data.tagCloudUseOr||null;
+	var resourceList=data.resourceList||true;
 	if (typeof tagCloud === 'string' ) {
 		if (tagCloud && tagCloud.toLowerCase()=='true') tagCloud=true;
 		else tagCloud=false;
 	}
 	var tagCloudLimit=data.tagCloudLimit||null;
 	var tags=data.tags||{};
-	self.tagman.findResources(tags,orderBy,limit,offset)
-	.then( (result) => {
-		if (tagCloud) {
-			var list=result;
-			self.tagman.tagCloud(tags,tagCloudLimit)
-			.then( (cloud) => {
-				callback( null, {'resources':list,'tagCloud':cloud} );
-			}, (err) => {
-				callback({code: 500, msg: err});
-			});
-		} else {
-			callback(null,{'resources':result});
-		}
-	}, (err) => {
-		callback({code: 500, msg: err});
-	});
+	if (resourceList) {
+		self.tagman.findResources(tags,orderBy,limit,offset)
+		.then( (result) => {
+			if (tagCloud) {
+				var list=result;
+				self.tagman.tagCloud(tags,tagCloudLimit,tagCloudUseOr)
+				.then( (cloud) => {
+					callback( null, {'resources':list,'tagCloud':cloud} );
+				}, (err) => {
+					callback({code: 500, msg: err});
+				});
+			} else {
+				callback(null,{'resources':result});
+			}
+		}, (err) => {
+			callback({code: 500, msg: err});
+		});
+	} else if (tagCloud) {
+		self.tagman.tagCloud(tags,tagCloudLimit,tagCloudUseOr)
+		.then( (cloud) => {
+			callback( null, {'tagCloud':cloud} );
+		}, (err) => {
+			callback({code: 500, msg: err});
+		});
+	} else {
+		callback( null, {} );
+	}
 }
 
 Handler.prototype.getSuggestions=function(data,callback) {

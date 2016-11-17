@@ -127,9 +127,9 @@ function Engine(sqlfilepath,callback) {
 			});
 			return d.promise;
 		},
-		tagCloud: (tags,limit) => {
+		tagCloud: (tags,limit,useOr) => {
 			var d=Q.defer();
-			self.tagCloud(tags,limit, (err,res) => {
+			self.tagCloud(tags,limit,useOr, (err,res) => {
 				if (err) d.reject(err);
 				else d.resolve(res);
 			});
@@ -668,6 +668,7 @@ Engine.prototype.getResource=function (url,callback) {
 					delete row._modified_at;
 					delete row.label;
 					delete row.description;
+					row.template=1
 					if (callback) callback(null,row);
 				});
 			});
@@ -699,7 +700,7 @@ if you specify a limit of N, the top N in terms of weight will be returned.
 if no tags are specified, the tagcloud of the whole database will be generated (in which case a limit 
 is highly recommended!)
 */
-Engine.prototype.tagCloud=function(tags,limit,callback) {
+Engine.prototype.tagCloud=function(tags,limit,useOr,callback) {
 
 	var params=[];
 	var self=this;
@@ -731,8 +732,13 @@ Engine.prototype.tagCloud=function(tags,limit,callback) {
 	for (var name in tags) {
 		if (name in self._tags) {
 			var tagId=self._tags[name].rowid;
-			if (i==1) sql+=" WHERE ";
-			else sql+=" AND ";
+			if (i==1) {
+				sql+=" WHERE ";
+			} else if (useOr) {
+				sql+=" OR ";
+			} else {
+				sql+=" AND ";
+			}
 			if (tags[name]==-1) sql+='NOT ';
 			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_id=? WHERE i"+i+".desc_id=r.rowid)";
 			if (!where) where=' WHERE rt.tag_id!=?';

@@ -134,7 +134,6 @@ Handler.prototype.handleRequest= function ( req, resp, callback ) {
 
 
 Handler.prototype.getResources=function(data,callback) {
-	console.log('PARAMS',data);
 	var self=this;
 	var limit=data.limit||null;
 	var offset=data.offset||null;

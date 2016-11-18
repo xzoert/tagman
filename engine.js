@@ -43,9 +43,12 @@ function Engine(sqlfilepath,callback) {
 				self._db.run("CREATE UNIQUE INDEX tree_descendant on tree_idx (desc_id,anc_id)");
 				self._db.run("CREATE INDEX tree_ancestor on tree_idx (anc_id)");
 				self._db.run("CREATE TABLE resource_field (name TEXT, type INTEGER)");
-				self._db.run("CREATE TABLE resource_tag (resource_id INTEGER, tag_id INTEGER, comment TEXT, FOREIGN KEY (resource_id) REFERENCES resource (rowid), FOREIGN KEY (tag_id) REFERENCES tag (rowid))");
+				self._db.run("CREATE TABLE resource_tag (resource_id INTEGER, tag_id INTEGER, tag_path TEXT, comment TEXT, FOREIGN KEY (resource_id) REFERENCES resource (rowid), FOREIGN KEY (tag_id) REFERENCES tag (rowid))");
 				self._db.run("CREATE UNIQUE INDEX resource_tag_relation on resource_tag (resource_id,tag_id)");
 				self._db.run("CREATE INDEX resource_tag_by_tag on resource_tag (tag_id)");
+				self._db.run("CREATE INDEX resource_tag_by_tagpath on resource_tag (tag_path)");
+				self._db.run("CREATE TABLE meta (key TEXT, value TEXT)");
+				self._db.run("INSERT INTO meta (key,value) VALUES ('format_version','1')");
 			}
 			/*
 			load all resource fields, which are cached.
@@ -576,9 +579,9 @@ Engine.prototype.findResources=function(tags,orderBy,limit,offset,callback) {
 			if (i==1) sql+=" WHERE ";
 			else sql+=" AND ";
 			if (tags[name]==-1) sql+='NOT ';
-			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_id=? WHERE i"+i+".desc_id=r.rowid)";
+			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_path LIKE ? WHERE i"+i+".desc_id=r.rowid)";
 			i++;
-			params.push(tagId);
+			params.push(name+'-%');
 		} else {
 			// tag not in database, no document matches!
 			console.log('TAG '+name+' NOT IN DATABASE');
@@ -727,6 +730,7 @@ Engine.prototype.tagCloud=function(tags,limit,useOr,callback) {
 	}
 	*/
 	var where=null;
+	var whereParams=[]
 	var sql="SELECT r.rowid,r.* FROM resource r";
 	var i=1;
 	for (var name in tags) {
@@ -740,10 +744,11 @@ Engine.prototype.tagCloud=function(tags,limit,useOr,callback) {
 				sql+=" AND ";
 			}
 			if (tags[name]==-1) sql+='NOT ';
-			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_id=? WHERE i"+i+".desc_id=r.rowid)";
+			sql+="EXISTS ( SELECT rt"+i+".rowid FROM tree_idx i"+i+" INNER JOIN resource_tag rt"+i+" ON  rt"+i+".resource_id=i"+i+".anc_id AND rt"+i+".tag_path LIKE ? WHERE i"+i+".desc_id=r.rowid)";
+			params.push(name+'-%');
 			if (!where) where=' WHERE rt.tag_id!=?';
 			else where+=' AND rt.tag_id!=?';
-			params.push(tagId);
+			whereParams.push(tagId);
 			i++;
 		} else {
 			// tag not in database, no document matches!
@@ -755,7 +760,7 @@ Engine.prototype.tagCloud=function(tags,limit,useOr,callback) {
 	sql="SELECT res.name as name, COUNT(res.desc_id) as weight FROM ( SELECT DISTINCT i.desc_id as desc_id,tag.name as name,tag.rowid as rowid FROM ( "+sql+" ) t INNER JOIN tree_idx i ON i.desc_id=t.rowid INNER JOIN resource_tag rt ON rt.resource_id=i.anc_id INNER JOIN tag ON tag.rowid=rt.tag_id ";
 	if (where) {
 		sql+=where;
-		params=params.concat(params);
+		params=params.concat(whereParams);
 	}
 	sql+=") res";
 	/*
@@ -851,7 +856,7 @@ Engine.prototype._tagUsed=function(db,tag,comment,resourceId,callback) {
 			if (self._error(err,callback,db)) return;
 			to.resource_count+=1;
 			to.last_used_at=now;
-			db.run("INSERT INTO resource_tag (resource_id, tag_id, comment) VALUES (?,?,?)",[resourceId,to.rowid,comment], (err) => {
+			db.run("INSERT INTO resource_tag (resource_id, tag_id, tag_path, comment) VALUES (?,?,?,?)",[resourceId,to.rowid,to.name+'-',comment], (err) => {
 				if (self._error(err,callback,db)) return;
 				if (callback) callback(null,to);
 			});
@@ -863,7 +868,7 @@ Engine.prototype._tagUsed=function(db,tag,comment,resourceId,callback) {
 			if (self._error(err,callback,db)) return;
 			to.rowid=this.lastID;
 			self._tags[tag]=to;
-			db.run("INSERT INTO resource_tag (resource_id, tag_id,comment) VALUES (?,?,?)",[resourceId,to.rowid,comment], (err) => {
+			db.run("INSERT INTO resource_tag (resource_id, tag_id, tag_path, comment) VALUES (?,?,?,?)",[resourceId,to.rowid,to.name+'-',comment], (err) => {
 				if (self._error(err,callback,db)) return;
 				if (callback) callback(null,to);
 			});

@@ -107,6 +107,8 @@ Handler.prototype.handleRequest= function ( req, resp, callback ) {
 					return self.getResources(data,callback);
 				case 'resource':
 					return self.getResource(data,callback);
+				case 'urls':
+					return self.getUrlList(data,callback);
 				case 'update':
 					return self.updateResource(data,callback);
 				case 'rename':
@@ -119,6 +121,8 @@ Handler.prototype.handleRequest= function ( req, resp, callback ) {
 					return self.clear(callback);
 				case 'remove':
 					return self.remove(data,callback);
+				case 'removeList':
+					return self.removeList(data,callback);
 					
 				default:
 					callback({code: 404, msg: 'Not found'});
@@ -203,6 +207,19 @@ Handler.prototype.getResource=function(data,callback) {
 	});
 }
 
+Handler.prototype.getUrlList=function(data,callback) {
+	var self=this;
+	var urlList=data||[];
+	self.tagman.getBulk(urlList)
+	.then( (result) => {
+		if (!result) result=null;
+		callback(null,result);
+	}, (err) => {
+		callback({code: 500, msg: err});
+	});
+}
+
+
 Handler.prototype.remove=function(data,callback) {
 	var self=this;
 	var url=data.url||'';
@@ -215,6 +232,17 @@ Handler.prototype.remove=function(data,callback) {
 	});
 }
 
+Handler.prototype.removeList=function(data,callback) {
+	var self=this;
+	var urlList=data||[];
+	self.tagman.removeBulk(urlList)
+	.then( (result) => {
+		if (!result) result=null;
+		callback(null,result);
+	}, (err) => {
+		callback({code: 500, msg: err});
+	});
+}
 
 Handler.prototype.updateResource=function(data,callback) {
 	var self=this;
@@ -237,7 +265,7 @@ Handler.prototype.updateResource=function(data,callback) {
 Handler.prototype.renameResource=function(data,callback) {
 	var self=this;
 	var url=data.url||'';
-	if (!url) {
+	if (!url) {                                                                    
 		callback({code: 500, msg: 'No url'});
 		return;
 	}
@@ -249,7 +277,13 @@ Handler.prototype.renameResource=function(data,callback) {
 	self.tagman.rename(url,newUrl,data.renameDescendants)
 	.then( (result) => {
 		if (!result) result=null;
-		callback(null,result);
+		self.tagman.getResource(newUrl)
+		.then( (result) => {
+			if (!result) result=null;
+			callback(null,result);
+		}, (err) => {
+			callback({code: 500, msg: err});
+		});
 	}, (err) => {
 		callback({code: 500, msg: err});
 	});

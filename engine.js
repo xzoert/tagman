@@ -106,6 +106,14 @@ function Engine(sqlfilepath,callback) {
 			});
 			return d.promise;
 		},                                   
+		removeBulk: (urlList) => {
+			var d=Q.defer();
+			self.removeBulk(urlList, (err,id) => {
+				if (err) d.reject(err);
+				else d.resolve(id);
+			});
+			return d.promise;
+		},                                   
 		rename: (url,newUrl,renameDescendants) => {
 			var d=Q.defer();
 			self.rename(url, newUrl, renameDescendants, (err,id) => {
@@ -125,6 +133,14 @@ function Engine(sqlfilepath,callback) {
 		getResource: (url) => {
 			var d=Q.defer();
 			self.getResource(url, (err,res) => {
+				if (err) d.reject(err);
+				else d.resolve(res);
+			});
+			return d.promise;
+		},
+		getBulk: (urlList) => {
+			var d=Q.defer();
+			self.getBulk(urlList, (err,res) => {
 				if (err) d.reject(err);
 				else d.resolve(res);
 			});
@@ -267,7 +283,7 @@ Engine.prototype.clear=function(callback) {
 	});
 	this._tags={};
 }
-                              
+
 Engine.prototype.loadBulk=function(data,callback) {
 	var self=this;
 	self._db.beginTransaction(function(err,db) {
@@ -294,6 +310,56 @@ Engine.prototype.loadBulk=function(data,callback) {
 	});
 	
 }
+
+Engine.prototype.removeBulk=function(data,callback) {
+	var self=this;
+	self._db.beginTransaction(function(err,db) {
+		if (self._error(err,callback,db)) return;
+		var datai=new AsyncIterator(data);
+		datai.seq(function (i,next) {
+			var url=data[i];
+			self._remove(db,url,function (err,id) {
+				next(err);
+			});
+		},function (err) {
+			if (err) {
+				db.rollback( () => {
+					if (callback) callback(err);
+					else throw err;
+				});
+			} else {
+				db.commit( (err) => {
+					if (callback) callback(err);
+					else if (err) throw err;
+				});
+			}
+		});
+	});
+}
+
+
+Engine.prototype.getBulk=function(urlList,callback) {
+	var self=this;
+	var listi=new AsyncIterator(urlList);
+	result=[]
+	listi.seq(function (i,next) {
+		var url=urlList[i];
+		self.getResource(url,function (err,res) {
+			if (res) result.push(res)
+			next(err);
+		});
+	},function (err) {
+		if (err) {
+			db.rollback( () => {
+				if (callback) callback(err);
+				else throw err;
+			});
+		} else {
+			if (callback) callback(null,result);
+		}
+	});
+}
+
 
 /*
 updates (or creates if it does not exist) an entry.
@@ -416,33 +482,48 @@ Engine.prototype._update=function(db,url,tags,data,callback) {
 /*
 removes an entry with a given url
 */
-Engine.prototype.remove=function (url,callback) {
+Engine.prototype.remove=function(url,callback) {
 	var self=this;
-	this._db.get("SELECT rowid FROM resource WHERE _path=?",[self._pathFromUrl(url)], (err, resource) => {
+	self._db.beginTransaction(function(err,db) {
+		if (self._error(err,callback,db)) return;
+		self._remove(db,url,function (err,id) {
+			if (err) {
+				db.rollback( () => {
+					if (callback) callback(err,null);
+					else throw err;
+				});
+			} else {
+				db.commit( (err) => {
+					if (callback) callback(err,id);
+					else if (err) throw err;
+				});
+			}
+		});
+	});
+}
+
+Engine.prototype._remove=function (db,url,callback) {
+	var self=this;
+	db.get("SELECT rowid FROM resource WHERE _path=?",[self._pathFromUrl(url)], (err, resource) => {
 		if (self._error(err,callback)) return;
 		if (resource) {
-			self._db.beginTransaction( (err,db) => {
-				var rTags={};
-				db.each("SELECT tag.name from resource_tag, tag where resource_tag.tag_id=tag.rowid and resource_tag.resource_id="+resource.rowid, (err,row) => {
-					if (self._error(err,callback,db)) return;
-					rTags[row.name]=1;
+			var rTags={};
+			db.each("SELECT tag.name from resource_tag, tag where resource_tag.tag_id=tag.rowid and resource_tag.resource_id="+resource.rowid, (err,row) => {
+				if (self._error(err,callback,db)) return;
+				rTags[row.name]=1;
+			}, (err) => {
+				if (self._error(err,callback,db)) return;
+				var rIterator=new AsyncIterator(rTags);
+				rIterator.run( (name,next) => {
+					self._tagUnused(db,name,resource.rowid,next);
 				}, (err) => {
-					if (self._error(err,callback,db)) return;
-					var rIterator=new AsyncIterator(rTags);
-					rIterator.run( (name,next) => {
-						self._tagUnused(db,name,resource.rowid,next);
-					}, (err) => {
-						db.run("DELETE FROM tree_idx WHERE anc_id=? or desc_id=?",[resource.rowid,resource.rowid], (err) => {
+					db.run("DELETE FROM tree_idx WHERE anc_id=? or desc_id=?",[resource.rowid,resource.rowid], (err) => {
+						if (self._error(err,callback,db)) return;
+						db.run("DELETE FROM resource_tag WHERE resource_id=?",[resource.rowid], (err) => {
 							if (self._error(err,callback,db)) return;
-							db.run("DELETE FROM resource_tag WHERE resource_id=?",[resource.rowid], (err) => {
-								if (self._error(err,callback,db)) return;
-								db.run("DELETE FROM resource WHERE rowid=?",[resource.rowid], (err) => {
-									if (self._error(err,callback,db)) return;
-									db.commit( (err) => {
-										if (callback) callback(err,resource.rowid);
-										else if (err) throw err;
-									});
-								});
+							db.run("DELETE FROM resource WHERE rowid=?",[resource.rowid], (err) => {
+								if (callback) callback(err,resource.rowid);
+								else if (err) throw err;
 							});
 						});
 					});
@@ -649,6 +730,7 @@ Engine.prototype._getTags=function (row,callback) {
 	});
 }
 
+
 Engine.prototype.getResource=function (url,callback) {
 	var self=this;
 	var sql='SELECT rowid,* FROM resource WHERE _path=?';
@@ -661,7 +743,7 @@ Engine.prototype.getResource=function (url,callback) {
 			self._db.get(sql,[path], (err,row) => {
 				if (self._error(err,callback)) return;
 				if (!row) {
-					if (callback) callback(null,null);
+					if (callback) callback(null,{_url:url,_template:1});
 					return;
 				}
 				self._getTags(row, (err,row) => {
@@ -671,7 +753,7 @@ Engine.prototype.getResource=function (url,callback) {
 					delete row._modified_at;
 					delete row.label;
 					delete row.description;
-					row.template=1
+					row._template=1
 					if (callback) callback(null,row);
 				});
 			});
@@ -887,15 +969,25 @@ Engine.prototype._tagUnused=function(db,tag,resourceId,callback) {
 	var self=this;
 	if (tag in self._tags) {
 		var to=self._tags[tag];
-		db.run("UPDATE tag SET resource_count=? where name=?",[to.resource_count-1,tag], (err) => {
+		db.run("DELETE FROM resource_tag where tag_id=? AND resource_id=?",[to.rowid,resourceId], (err) => {
 			if (self._error(err,callback,db)) return;
-			db.run("DELETE FROM resource_tag where tag_id=? and resource_id=?",[to.rowid,resourceId], (err) => {
-				if (err) {
-					if (callback) callback(err);
-					else throw err;
-					return;
-				}
-			});
+			if (to.resource_count>1) {
+				db.run("UPDATE tag SET resource_count=? WHERE rowid=?",[to.resource_count-1,to.rowid], (err) => {
+					if (err) {
+						if (callback) callback(err);
+						else throw err;
+						return;
+					}
+				});
+			} else {
+				db.run("DELETE FROM tag WHERE rowid=?",[to.rowid], (err) => {
+					if (err) {
+						if (callback) callback(err);
+						else throw err;
+						return;
+					}
+				});
+			}
 			to.resource_count-=1;
 			callback(null,to);
 		});
